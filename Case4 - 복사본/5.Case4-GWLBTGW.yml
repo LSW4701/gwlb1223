@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Creates TGW, attachments, and routes based on parameters from other stacks."
+
+Parameters:
+  # N2S VPC Parameters
+  N2SVpcId:
+    Type: String
+  N2STgwSubnetAId:
+    Type: String
+  N2STgwSubnetBId:
+    Type: String
+  N2SPrivateSubnetARouteTableId:
+    Type: String
+  N2SPrivateSubnetBRouteTableId:
+    Type: String
+  N2SPublicSubnetARouteTableId:
+    Type: String
+  N2SPublicSubnetBRouteTableId:
+    Type: String
+
+  # VPC01 Parameters
+  VPC01Id:
+    Type: String
+  VPC01TgwSubnetAId:
+    Type: String
+  VPC01TgwSubnetBId:
+    Type: String
+  VPC01PrivateSubnetARouteTableId:
+    Type: String
+  VPC01PrivateSubnetBRouteTableId:
+    Type: String
+  VPC01CIDRBlock:
+    Type: String
+    Default: 10.1.0.0/16
+
+  # VPC02 Parameters
+  VPC02Id:
+    Type: String
+  VPC02TgwSubnetAId:
+    Type: String
+  VPC02TgwSubnetBId:
+    Type: String
+  VPC02PrivateSubnetARouteTableId:
+    Type: String
+  VPC02PrivateSubnetBRouteTableId:
+    Type: String
+  VPC02CIDRBlock:
+    Type: String
+    Default: 10.2.0.0/16
+  
+  # General Parameters
+  DefaultRouteBlock:
+    Type: String
+    Default: 0.0.0.0/0
+
+Resources:
+  TransitGatewayGWLB:
+    Type: "AWS::EC2::TransitGateway"
+    Properties:
+      AmazonSideAsn: 65001
+      Description: "TGW created by CloudFormation"
+      AutoAcceptSharedAttachments: "enable"
+      DefaultRouteTableAssociation: "disable"
+      DefaultRouteTablePropagation: "disable"
+      DnsSupport: "enable"
+      VpnEcmpSupport: "enable"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+
+  TransitGatewayRouteTableVPCIN:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-RT-VPC-IN'
+
+  TransitGatewayRouteTableVPCOUT:
+    Type: "AWS::EC2::TransitGatewayRouteTable"
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-RT-VPC-OUT'
+
+  # --- VPC Attachments ---
+  TransitGatewayAttachmentN2SVPC:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref N2SVpcId
+      SubnetIds: [!Ref N2STgwSubnetAId, !Ref N2STgwSubnetBId]
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Attach-N2SVPC'
+
+  TransitGatewayAttachmentVPC01:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC01Id
+      SubnetIds: [!Ref VPC01TgwSubnetAId, !Ref VPC01TgwSubnetBId]
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Attach-VPC01'
+
+  TransitGatewayAttachmentVPC02:
+    Type: "AWS::EC2::TransitGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC02Id
+      SubnetIds: [!Ref VPC02TgwSubnetAId, !Ref VPC02TgwSubnetBId]
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Attach-VPC02'
+
+  # --- TGW Route Table Associations ---
+  TransitGatewayRouteTableAssociationN2S:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentN2SVPC
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCIN
+
+  TransitGatewayRouteTableAssociationVPC01:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC01
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCOUT
+
+  TransitGatewayRouteTableAssociationVPC02:
+    Type: "AWS::EC2::TransitGatewayRouteTableAssociation"
+    Properties:
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC02
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCOUT
+
+  # --- TGW Routes ---
+  TransitGatewayRouteN2S01:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref DefaultRouteBlock
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentN2SVPC
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCOUT
+
+  TransitGatewayRouteVPC01:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref VPC01CIDRBlock
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC01
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCIN
+
+  TransitGatewayRouteVPC02:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref VPC02CIDRBlock
+      TransitGatewayAttachmentId: !Ref TransitGatewayAttachmentVPC02
+      TransitGatewayRouteTableId: !Ref TransitGatewayRouteTableVPCIN
+
+  # --- VPC Route Table Modifications ---
+  N2SVPCAZAPrivateRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPrivateSubnetARouteTableId
+      DestinationCidrBlock: !Ref VPC01CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      
+  N2SVPCAZAPrivateRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPrivateSubnetARouteTableId
+      DestinationCidrBlock: !Ref VPC02CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      
+  N2SVPCAZAPublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPublicSubnetARouteTableId
+      DestinationCidrBlock: !Ref VPC01CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      
+  N2SVPCAZAPublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPublicSubnetARouteTableId
+      DestinationCidrBlock: !Ref VPC02CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  N2SVPCAZBPrivateRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPrivateSubnetBRouteTableId
+      DestinationCidrBlock: !Ref VPC01CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  N2SVPCAZBPrivateRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPrivateSubnetBRouteTableId
+      DestinationCidrBlock: !Ref VPC02CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  N2SVPCAZBPublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPublicSubnetBRouteTableId
+      DestinationCidrBlock: !Ref VPC01CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  N2SVPCAZBPublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentN2SVPC
+    Properties:
+      RouteTableId: !Ref N2SPublicSubnetBRouteTableId
+      DestinationCidrBlock: !Ref VPC02CIDRBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  VPC01AZAPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentVPC01
+    Properties:
+      RouteTableId: !Ref VPC01PrivateSubnetARouteTableId
+      DestinationCidrBlock: !Ref DefaultRouteBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      
+  VPC01AZBPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentVPC01
+    Properties:
+      RouteTableId: !Ref VPC01PrivateSubnetBRouteTableId
+      DestinationCidrBlock: !Ref DefaultRouteBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+  VPC02AZAPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentVPC02
+    Properties:
+      RouteTableId: !Ref VPC02PrivateSubnetARouteTableId
+      DestinationCidrBlock: !Ref DefaultRouteBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+      
+  VPC02AZBPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TransitGatewayAttachmentVPC02
+    Properties:
+      RouteTableId: !Ref VPC02PrivateSubnetBRouteTableId
+      DestinationCidrBlock: !Ref DefaultRouteBlock
+      TransitGatewayId: !Ref TransitGatewayGWLB
+
+Outputs:
+  TGWId:
+    Description: The ID of the created Transit Gateway
+    Value: !Ref TransitGatewayGWLB
+    Export:
+      Name: !Sub "${AWS::StackName}-TGWId"

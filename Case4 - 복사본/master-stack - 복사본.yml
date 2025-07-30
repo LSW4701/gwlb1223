@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Master CloudFormation stack to orchestrate the deployment of the entire network architecture.
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: 'mss-securezone-cfn'
+    Description: The S3 bucket where the CloudFormation templates are stored.
+  
+  # 1. 마스터 스택에 이름 접두사 파라미터를 추가합니다.
+  ResourceNamePrefix:
+    Type: String
+    Default: 'mss' 
+    Description: "A common prefix for all resources created by the stacks."
+
+Resources:
+  # --- 1. GWLB VPC 스택 ---
+  GWLBVPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/Ingress-Egress-integration-architecture/1.Case4-GWLBVPC.yml"
+      Parameters:
+        # 2. 마스터 파라미터와 스택 역할을 조합하여 자식 스택에 전달합니다.
+        ResourceNamePrefix: !Sub "${ResourceNamePrefix}-GWLBVPC"
+        VPCCIDRBlock: 10.254.0.0/16
+        
+  # --- 2. N2S VPC 스택 ---
+  N2SVPCStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: GWLBVPCStack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/Ingress-Egress-integration-architecture/2.Case4-N2SVPC.yml"
+      Parameters:
+        ResourceNamePrefix: !Sub "${ResourceNamePrefix}-N2SVPC"
+        VPCEndpointServiceName4: !GetAtt GWLBVPCStack.Outputs.VPCEndpointServiceName
+        VPCCIDRBlock: 10.11.0.0/16
+
+  # --- 3. VPC01 스택 ---
+  VPC01Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/Ingress-Egress-integration-architecture/3.Case4-VPC01.yml"
+      Parameters:
+        ResourceNamePrefix: !Sub "${ResourceNamePrefix}-VPC01"
+        VPCCIDRBlock: 10.1.0.0/16
+
+  # --- 4. VPC02 스택 ---
+  VPC02Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/Ingress-Egress-integration-architecture/4.Case4-VPC02.yml"
+      Parameters:
+        ResourceNamePrefix: !Sub "${ResourceNamePrefix}-VPC02"
+        VPCCIDRBlock: 10.2.0.0/16
+
+  # --- 5. TGW 스택 ---
+  TGWStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - N2SVPCStack
+      - VPC01Stack
+      - VPC02Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/Ingress-Egress-integration-architecture/5.Case4-GWLBTGW.yml"
+      Parameters:
+        ResourceNamePrefix: !Sub "${ResourceNamePrefix}-TGW"
+        # ... (이전과 동일한 다른 파라미터들)
+        N2SVpcId: !GetAtt N2SVPCStack.Outputs.VpcId
+        N2STgwSubnetAId: !GetAtt N2SVPCStack.Outputs.TGWSubnetA
+        N2STgwSubnetBId: !GetAtt N2SVPCStack.Outputs.TGWSubnetB
+        N2SPrivateSubnetARouteTableId: !GetAtt N2SVPCStack.Outputs.PrivateSubnetARouteTable
+        N2SPrivateSubnetBRouteTableId: !GetAtt N2SVPCStack.Outputs.PrivateSubnetBRouteTable
+        N2SPublicSubnetARouteTableId: !GetAtt N2SVPCStack.Outputs.PublicSubnetARouteTable
+        N2SPublicSubnetBRouteTableId: !GetAtt N2SVPCStack.Outputs.PublicSubnetBRouteTable
+        VPC01Id: !GetAtt VPC01Stack.Outputs.VpcId
+        VPC01TgwSubnetAId: !GetAtt VPC01Stack.Outputs.TGWSubnetA
+        VPC01TgwSubnetBId: !GetAtt VPC01Stack.Outputs.TGWSubnetB
+        VPC01PrivateSubnetARouteTableId: !GetAtt VPC01Stack.Outputs.PrivateSubnetARouteTable
+        VPC01PrivateSubnetBRouteTableId: !GetAtt VPC01Stack.Outputs.PrivateSubnetBRouteTable
+        VPC01CIDRBlock: !GetAtt VPC01Stack.Outputs.VpcCIDR
+        VPC02Id: !GetAtt VPC02Stack.Outputs.VpcId
+        VPC02TgwSubnetAId: !GetAtt VPC02Stack.Outputs.TGWSubnetA
+        VPC02TgwSubnetBId: !GetAtt VPC02Stack.Outputs.TGWSubnetB
+        VPC02PrivateSubnetARouteTableId: !GetAtt VPC02Stack.Outputs.PrivateSubnetARouteTable
+        VPC02PrivateSubnetBRouteTableId: !GetAtt VPC02Stack.Outputs.PrivateSubnetBRouteTable
+        VPC02CIDRBlock: !GetAtt VPC02Stack.Outputs.VpcCIDR
+
+Outputs:
+  FinalTGWId:
+    Description: "The ID of the finally created Transit Gateway"
+    Value: !GetAtt TGWStack.Outputs.TGWId

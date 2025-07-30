@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Master CloudFormation stack to orchestrate the deployment of the entire network architecture.
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: 'mss-securezone-cfn'
+    Description: The S3 bucket where the CloudFormation templates are stored.
+
+Resources:
+  # --- 1. GWLB VPC 스택 ---
+  GWLBVPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/1.Case4-GWLBVPC.yml"
+      Parameters:
+        VPCCIDRBlock: 10.254.0.0/16 # 필요 시 파라미터 값 변경
+        
+  # --- 2. N2S VPC 스택 ---
+  N2SVPCStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: GWLBVPCStack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/2.Case4-N2SVPC.yml"
+      Parameters:
+        VPCEndpointServiceName4: !GetAtt GWLBVPCStack.Outputs.VPCEndpointServiceName
+        VPCCIDRBlock: 10.11.0.0/16 # 필요 시 파라미터 값 변경
+
+  # --- 3. VPC01 스택 ---
+  VPC01Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/3.Case4-VPC01.yml"
+      Parameters:
+        VPCCIDRBlock: 10.1.0.0/16 # 필요 시 파라미터 값 변경
+
+  # --- 4. VPC02 스택 ---
+  VPC02Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/4.Case4-VPC02.yml"
+      Parameters:
+        VPCCIDRBlock: 10.2.0.0/16 # 필요 시 파라미터 값 변경
+
+  # --- 5. TGW 스택 (모든 VPC 생성 완료 후 실행) ---
+  TGWStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - GWLBVPCStack
+      - N2SVPCStack
+      - VPC01Stack
+      - VPC02Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.${AWS::Region}.amazonaws.com/${S3BucketName}/5.Case4-GWLBTGW.yml"
+      Parameters:
+        # N2S VPC Outputs -> TGW Parameters
+        N2SVpcId: !GetAtt N2SVPCStack.Outputs.VpcId
+        N2STgwSubnetAId: !GetAtt N2SVPCStack.Outputs.TGWSubnetA
+        N2STgwSubnetBId: !GetAtt N2SVPCStack.Outputs.TGWSubnetB
+        N2SPrivateSubnetARouteTableId: !GetAtt N2SVPCStack.Outputs.PrivateSubnetARouteTable
+        N2SPrivateSubnetBRouteTableId: !GetAtt N2SVPCStack.Outputs.PrivateSubnetBRouteTable
+        N2SPublicSubnetARouteTableId: !GetAtt N2SVPCStack.Outputs.PublicSubnetARouteTable
+        N2SPublicSubnetBRouteTableId: !GetAtt N2SVPCStack.Outputs.PublicSubnetBRouteTable
+        # VPC01 Outputs -> TGW Parameters
+        VPC01Id: !GetAtt VPC01Stack.Outputs.VpcId
+        VPC01TgwSubnetAId: !GetAtt VPC01Stack.Outputs.TGWSubnetA
+        VPC01TgwSubnetBId: !GetAtt VPC01Stack.Outputs.TGWSubnetB
+        VPC01PrivateSubnetARouteTableId: !GetAtt VPC01Stack.Outputs.PrivateSubnetARouteTable
+        VPC01PrivateSubnetBRouteTableId: !GetAtt VPC01Stack.Outputs.PrivateSubnetBRouteTable
+        VPC01CIDRBlock: !GetAtt VPC01Stack.Outputs.VpcCIDR # VPC01 스택에 VpcCIDR 출력이 필요
+        # VPC02 Outputs -> TGW Parameters
+        VPC02Id: !GetAtt VPC02Stack.Outputs.VpcId
+        VPC02TgwSubnetAId: !GetAtt VPC02Stack.Outputs.TGWSubnetA
+        VPC02TgwSubnetBId: !GetAtt VPC02Stack.Outputs.TGWSubnetB
+        VPC02PrivateSubnetARouteTableId: !GetAtt VPC02Stack.Outputs.PrivateSubnetARouteTable
+        VPC02PrivateSubnetBRouteTableId: !GetAtt VPC02Stack.Outputs.PrivateSubnetBRouteTable
+        VPC02CIDRBlock: !GetAtt VPC02Stack.Outputs.VpcCIDR # VPC02 스택에 VpcCIDR 출력이 필요
+
+Outputs:
+  FinalTGWId:
+    Description: "The ID of the finally created Transit Gateway"
+    Value: !GetAtt TGWStack.Outputs.TGWId
